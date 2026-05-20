@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理后台 · 晚宴话题抽签</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Microsoft YaHei', sans-serif;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 { color: #667eea; margin-bottom: 20px; font-size: 1.4rem; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+        .stat-num { font-size: 2rem; font-weight: 700; color: #667eea; }
+        .stat-label { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-top: 4px; }
+        
+        .table-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+        .table-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 14px;
+        }
+        .table-card h3 { font-size: 0.9rem; color: #f093fb; margin-bottom: 8px; }
+        .table-card .progress {
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            height: 6px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        .table-card .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #f093fb);
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        .table-card .count { font-size: 0.8rem; color: rgba(255,255,255,0.5); }
+
+        .actions { margin-bottom: 30px; }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.8; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-info { background: #3b82f6; color: white; }
+        .btn-success { background: #10b981; color: white; }
+
+        .log {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.8rem;
+            line-height: 1.8;
+        }
+        .log-entry { border-bottom: 1px solid rgba(255,255,255,0.05); padding: 4px 0; }
+        
+        .warning {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎛️ 管理后台 · 晚宴话题抽签</h1>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-num" id="total-drawn">0</div>
+            <div class="stat-label">已抽取</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-num" id="total-remaining">144</div>
+            <div class="stat-label">剩余</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-num" id="tables-full">0</div>
+            <div class="stat-label">已满桌</div>
+        </div>
+    </div>
+
+    <h2 style="font-size:1rem; margin-bottom:12px; color:rgba(255,255,255,0.7);">各桌抽取进度</h2>
+    <div class="table-grid" id="table-grid"></div>
+
+    <div class="actions">
+        <h2 style="font-size:1rem; margin-bottom:12px; color:rgba(255,255,255,0.7);">操作</h2>
+        <button class="btn btn-info" onclick="exportData()">📥 导出数据</button>
+        <button class="btn btn-success" onclick="initDatabase()">🔧 初始化数据库</button>
+        <button class="btn btn-danger" onclick="confirmReset()">🗑️ 重置全部</button>
+        <div class="warning" id="reset-warning">
+            ⚠️ 确认要重置所有抽签记录吗？此操作不可恢复！
+            <br><br>
+            <button class="btn btn-danger" onclick="resetAll()">确认重置</button>
+            <button class="btn btn-info" onclick="cancelReset()">取消</button>
+        </div>
+    </div>
+
+    <h2 style="font-size:1rem; margin-bottom:12px; color:rgba(255,255,255,0.7);">抽取记录</h2>
+    <div class="log" id="log">等待连接数据库...</div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+    <script>
+    // 请替换为你的 Firebase 配置（与 index.html 相同）
+    const firebaseConfig = {
+  apiKey: "AIzaSyDTevv_jebvMdp7Okk6dulxEpgsGi8hWrg",
+  authDomain: "teambuilding-2026-e491a.firebaseapp.com",
+  databaseURL: "https://teambuilding-2026-e491a-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "teambuilding-2026-e491a",
+  storageBucket: "teambuilding-2026-e491a.firebasestorage.app",
+  messagingSenderId: "218685210440",
+  appId: "1:218685210440:web:c0c2b744cead9468b5bd7d"
+};
+
+    const THEMES = [
+        "AI与统计师", "AI与程序员", "AI与统计师2", "AI与程序员2",
+        "AI未来", "驯服AI技巧1", "驯服AI技巧2", "运动",
+        "美食", "电影", "宠物", "概率"
+    ];
+
+    let db;
+
+    function init() {
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+            renderTableGrid();
+            listenToChanges();
+        } catch(e) {
+            document.getElementById('log').textContent = '数据库连接失败: ' + e.message;
+        }
+    }
+
+    function renderTableGrid() {
+        const grid = document.getElementById('table-grid');
+        grid.innerHTML = THEMES.map((theme, i) => `
+            <div class="table-card">
+                <h3>第${i+1}桌 · ${theme}</h3>
+                <div class="progress">
+                    <div class="progress-bar" id="bar-${i+1}" style="width:0%"></div>
+                </div>
+                <div class="count" id="count-${i+1}">0/12</div>
+            </div>
+        `).join('');
+    }
+
+    function listenToChanges() {
+        db.ref('drawn').on('value', (snapshot) => {
+            const drawn = snapshot.val() || {};
+            const entries = Object.entries(drawn);
+            const totalDrawn = entries.length;
+
+            document.getElementById('total-drawn').textContent = totalDrawn;
+            document.getElementById('total-remaining').textContent = 144 - totalDrawn;
+
+            // Count per table
+            const tableCounts = {};
+            for (let i = 1; i <= 12; i++) tableCounts[i] = 0;
+            
+            entries.forEach(([idx]) => {
+                const tableNum = Math.floor(parseInt(idx) / 12) + 1;
+                if (tableCounts[tableNum] !== undefined) tableCounts[tableNum]++;
+            });
+
+            let fullTables = 0;
+            for (let i = 1; i <= 12; i++) {
+                const count = tableCounts[i] || 0;
+                if (count >= 12) fullTables++;
+                const bar = document.getElementById('bar-' + i);
+                const countEl = document.getElementById('count-' + i);
+                if (bar) bar.style.width = (count / 12 * 100) + '%';
+                if (countEl) countEl.textContent = `${count}/12`;
+            }
+            document.getElementById('tables-full').textContent = fullTables;
+
+            // Log
+            const logEl = document.getElementById('log');
+            if (entries.length === 0) {
+                logEl.textContent = '暂无抽签记录';
+            } else {
+                const sorted = entries
+                    .filter(([, v]) => v.timestamp)
+                    .sort((a, b) => (b[1].timestamp || 0) - (a[1].timestamp || 0));
+                
+                logEl.innerHTML = sorted.map(([idx, val]) => {
+                    const time = val.timestamp ? new Date(val.timestamp).toLocaleString('zh-CN') : '未知';
+                    const tableNum = Math.floor(parseInt(idx) / 12) + 1;
+                    return `<div class="log-entry">🎲 #${idx} | 第${tableNum}桌 | ${time} | ${val.deviceId || '未知设备'}</div>`;
+                }).join('');
+            }
+        });
+    }
+
+    function initDatabase() {
+        if (!db) return alert('数据库未连接');
+        // Just ensure the path exists
+        db.ref('drawn').once('value').then(() => {
+            alert('数据库已就绪！');
+        });
+    }
+
+    function confirmReset() {
+        document.getElementById('reset-warning').style.display = 'block';
+    }
+
+    function cancelReset() {
+        document.getElementById('reset-warning').style.display = 'none';
+    }
+
+    function resetAll() {
+        if (!db) return alert('数据库未连接');
+        db.ref('drawn').remove().then(() => {
+            alert('已重置所有抽签记录！');
+            document.getElementById('reset-warning').style.display = 'none';
+        }).catch(e => alert('重置失败: ' + e.message));
+    }
+
+    function exportData() {
+        if (!db) return alert('数据库未连接');
+        db.ref('drawn').once('value').then((snapshot) => {
+            const data = snapshot.val() || {};
+            const csv = ['序号,桌号,主题,关键词,时间,设备ID'];
+            Object.entries(data).forEach(([idx, val]) => {
+                const tableNum = Math.floor(parseInt(idx) / 12) + 1;
+                const theme = THEMES[tableNum - 1] || '';
+                const time = val.timestamp ? new Date(val.timestamp).toISOString() : '';
+                csv.push(`${idx},${tableNum},${theme},"${val.keyword || ''}",${time},${val.deviceId || ''}`);
+            });
+            
+            const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `抽签记录_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
